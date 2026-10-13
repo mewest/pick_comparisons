@@ -1,0 +1,8 @@
+# Claude working notes (local only)
+pick_comparisons.md
+connect.json
+__pycache__/
+probe*.py
+Claude outputs/
+# raw pick dumps (large)
+output/

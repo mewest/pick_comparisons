@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pick Comparisons</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3/plotly.min.js"></script>
+<style>
+  :root { --fg:#1a1a1a; --muted:#666; --line:#d0d0d0; --bg:#fff; --panel:#f6f6f6; --accent:#1f4fbf; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:"Helvetica Neue","TeX Gyre Heros",Helvetica,Arial,sans-serif; font-size:16px; }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0 0 4px; font-size:24px; font-weight:600; }
+  .meta { color:var(--muted); font-size:14px; }
+  .toggle { display:flex; gap:8px; padding:8px 24px 4px; flex-wrap:wrap; }
+  .toggle label { border:1px solid var(--line); border-radius:6px; padding:8px 16px; cursor:pointer;
+                  font-size:16px; user-select:none; }
+  .toggle input { position:absolute; opacity:0; pointer-events:none; }
+  .toggle input:checked + span { font-weight:600; color:var(--accent); }
+  .toggle label:has(input:checked) { border-color:var(--accent); background:#eef3ff; }
+  .toggle label:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
+  .toggle.small { padding:6px 0 0; }
+  .toggle.small label { padding:5px 12px; font-size:15px; }
+  .error { color:#b00020; padding:4px 24px; }
+  main { padding:8px 24px 24px; max-width:1400px; }
+  section { border-top:1px solid var(--line); padding-top:10px; margin-bottom:12px; }
+  section h2 { margin:0; font-size:20px; font-weight:600; }
+  .plot { width:100%; height:560px; }
+  #p-map { height:680px; }
+  .tablewrap { max-height:80vh; overflow:auto; border:1px solid var(--line); border-radius:6px; margin-top:8px; }
+  table { border-collapse:collapse; width:100%; font-size:15px; font-variant-numeric:tabular-nums; }
+  th, td { padding:5px 12px; text-align:left; border-bottom:1px solid #eee; white-space:nowrap; }
+  th { position:sticky; top:0; background:var(--panel); cursor:pointer; user-select:none; font-weight:600;
+       border-bottom:1px solid var(--line); }
+  th[aria-sort="ascending"]::after { content:" ▲"; font-size:11px; }
+  th[aria-sort="descending"]::after { content:" ▼"; font-size:11px; }
+  td.num, th.num { text-align:right; }
+  tr.sel td { outline:2px solid var(--accent); outline-offset:-2px; }
+  .note { color:var(--muted); font-size:14px; margin:4px 0 0; }
+  @media (max-width: 860px) {
+    header, .toggle, .error, main { padding-left:16px; padding-right:16px; }
+    .toggle.small { padding-left:0; }
+    th, td { padding:5px 8px; }
+    .plot { height:460px; }
+    #p-map { height:520px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Raw Phase Picks</h1>
+  <div class="meta" id="meta">Loading…</div>
+</header>
+<div class="toggle" role="radiogroup" aria-label="SeisComP system">
+  <label><input type="radio" name="sys" value="onsite" checked><span>onsite</span></label>
+  <label><input type="radio" name="sys" value="offsite"><span>offsite</span></label>
+  <label><input type="radio" name="sys" value="dev"><span>dev</span></label>
+</div>
+<div class="error" id="error" hidden></div>
+<main>
+  <section><h2>Hourly picks by network and pipeline</h2><div class="plot" id="p-hourly"></div></section>
+  <section>
+    <h2>Average picks per hour by station</h2>
+    <div class="toggle small" role="radiogroup" aria-label="Pipeline">
+      <label><input type="radio" name="pipe" value="state" checked><span>state</span></label>
+      <label><input type="radio" name="pipe" value="global"><span>global</span></label>
+    </div>
+    <div class="plot" id="p-map"></div>
+    <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.01 floor.</p>
+  </section>
+  <section>
+    <h2>Stations</h2>
+    <div class="tablewrap"><table id="tbl">
+      <thead><tr>
+        <th data-k="net">Network</th><th data-k="sta">Station</th>
+        <th data-k="state" class="num">State picks/h</th><th data-k="global" class="num">Global picks/h</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const FONT = '"Helvetica Neue","TeX Gyre Heros",Helvetica,Arial,sans-serif';
+const GRID = {showgrid: true, gridcolor: "#eeeeee", gridwidth: 0.5, zeroline: false,
+              showline: true, mirror: true, linecolor: "#9a9a9a", linewidth: 1};
+const NETS = [{key: "AK", color: "#d62728"}, {key: "AV", color: "#7b2fa8"},
+              {key: "AT", color: "#2ca02c"}, {key: "II/IU", color: "#1f5fbf"}];
+const PIPES = [{key: "state", dash: "solid"}, {key: "global", dash: "dash"}];
+// 'hot' colour scale, white at the low end; log10(picks/hour) from -2 (0.01) to 3 (1000)
+const HOT = [[0, "#ffffff"], [0.35, "#ffd200"], [0.65, "#e60000"], [1, "#000000"]];
+const LMIN = -2, LMAX = 3;
+const TICKS = [0.01, 0.1, 1, 10, 100, 1000];
+
+const cache = {};
+let current = "onsite", pipe = "state", sortK = "state", sortDir = -1, selKey = null;
+
+const logRate = r => Math.min(LMAX, Math.max(LMIN, Math.log10(Math.max(r, 1e-9))));
+const fmtRate = r => r === 0 ? "0" : r < 0.1 ? r.toFixed(3) : r < 10 ? r.toFixed(2) : r.toFixed(1);
+const esc = s => String(s ?? "–").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function hotColor(r) {           // same mapping as the map colour scale
+  const f = (logRate(r) - LMIN) / (LMAX - LMIN);
+  for (let i = 1; i < HOT.length; i++) {
+    if (f <= HOT[i][0]) {
+      const [f0, c0] = HOT[i - 1], [f1, c1] = HOT[i], w = (f - f0) / (f1 - f0);
+      const a = hex(c0), b = hex(c1), c = a.map((v, j) => Math.round(v + w * (b[j] - v)));
+      return {bg: `rgb(${c})`, fg: (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) < 140 ? "#fff" : "#1a1a1a"};
+    }
+  }
+  return {bg: "#000", fg: "#fff"};
+}
+
+async function load(sys) {
+  if (!cache[sys]) {
+    const r = await fetch(`data/${sys}.json`, {cache: "no-store"});
+    if (!r.ok) throw new Error(`data/${sys}.json: HTTP ${r.status}`);
+    const d = await r.json();
+    d.stations?.forEach(s => s.key = `${s.net}.${s.sta}`);
+    cache[sys] = d;
+  }
+  return cache[sys];
+}
+
+// ---------- hourly plot ----------
+function drawHourly(d, narrow) {
+  const t0 = Date.parse(d.hourly.t0);
+  const traces = [];
+  for (const p of PIPES) for (const n of NETS) {
+    const y = d.hourly.series[`${n.key}|${p.key}`] || [];
+    traces.push({type: "scatter", mode: "lines", name: `${n.key} ${p.key}`,
+                 x: y.map((_, i) => new Date(t0 + (i + 0.5) * 3600e3).toISOString()), y,
+                 line: {color: n.color, dash: p.dash, width: 2},
+                 hovertemplate: `${n.key} ${p.key}: %{y} picks<br>%{x|%Y-%m-%d %H}:00–:59 UTC<extra></extra>`});
+  }
+  const layout = {
+    font: {family: FONT, size: 15, color: "#1a1a1a"},
+    title: {text: `<b>${d.system}</b> ${d.phase} picks per hour`, font: {size: 20}},
+    margin: narrow ? {l: 60, r: 15, t: 50, b: 150} : {l: 70, r: 20, t: 60, b: 60},
+    xaxis: {...GRID, type: "date", title: {text: "Time (UTC)"}, nticks: narrow ? 4 : 10},
+    yaxis: {...GRID, title: {text: "Picks per hour"}, rangemode: "tozero"},
+    legend: narrow ? {orientation: "h", x: 0, y: -0.25, yanchor: "top", font: {size: 14}}
+                   : {x: 1.01, xanchor: "left", y: 1, font: {size: 14}},
+    hovermode: "closest", plot_bgcolor: "white", paper_bgcolor: "white",
+  };
+  return Plotly.react("p-hourly", traces, layout, {responsive: true, displaylogo: false});
+}
+
+// ---------- map ----------
+function drawMap(d, narrow) {
+  const st = d.stations.filter(s => s.lat != null).sort((a, b) => a[pipe] - b[pipe]);   // busiest on top
+  const tr = {
+    type: "scattergeo", mode: "markers", lat: st.map(s => s.lat), lon: st.map(s => s.lon),
+    customdata: st.map(s => [s.key, fmtRate(s.state), fmtRate(s.global)]),
+    hovertemplate: "<b>%{customdata[0]}</b><br>state %{customdata[1]} /h<br>global %{customdata[2]} /h<extra></extra>",
+    marker: {symbol: "triangle-up", size: narrow ? 9 : 11, color: st.map(s => logRate(s[pipe])),
+             colorscale: HOT, cmin: LMIN, cmax: LMAX, line: {color: "#555", width: 0.6},
+             colorbar: {title: {text: narrow ? `${pipe} picks/hour` : `${pipe}<br>picks/hour`, font: {size: 14},
+                                ...(narrow ? {side: "top"} : {})},
+                        tickvals: TICKS.map(Math.log10), ticktext: TICKS.map(String), thickness: 16, outlinewidth: 1,
+                        ...(narrow ? {orientation: "h", x: 0.5, xanchor: "center", y: -0.02, yanchor: "top", len: 0.95}
+                                   : {len: 0.8})}},
+  };
+  const sel = st.find(s => s.key === selKey);
+  const ring = {type: "scattergeo", mode: "markers", hoverinfo: "skip", showlegend: false,
+                lat: sel ? [sel.lat] : [], lon: sel ? [sel.lon] : [],
+                marker: {symbol: "circle-open", size: 22, color: "#1f4fbf", line: {color: "#1f4fbf", width: 3}}};
+  const layout = {
+    font: {family: FONT, size: 15, color: "#1a1a1a"},
+    title: {text: narrow ? `<b>${d.system}</b> ${pipe}, ${d.phase} picks/hour`
+                         : `<b>${d.system}</b> ${pipe} pipeline, average ${d.phase} picks per hour`, font: {size: 20}},
+    margin: narrow ? {l: 5, r: 5, t: 50, b: 90} : {l: 10, r: 10, t: 60, b: 10},
+    showlegend: false,
+    geo: {
+      projection: {type: "conic conformal", parallels: [55, 65], rotation: {lon: -152}},
+      resolution: 50,
+      showland: true, landcolor: "#ececec", showocean: true, oceancolor: "#dfe9f3",
+      showcoastlines: true, coastlinecolor: "#555", coastlinewidth: 0.5,
+      showcountries: true, countrycolor: "#888", countrywidth: 0.5, showlakes: false,
+      lataxis: {range: [48, 73], showgrid: true, gridcolor: "#cfd8e0", gridwidth: 0.5, dtick: 5},
+      lonaxis: {range: [-185, -125], showgrid: true, gridcolor: "#cfd8e0", gridwidth: 0.5, dtick: 10},
+      showframe: true, framecolor: "#9a9a9a", framewidth: 1, bgcolor: "white",
+    },
+    paper_bgcolor: "white",
+  };
+  return Plotly.react("p-map", [tr, ring], layout, {responsive: true, displaylogo: false});
+}
+
+// ---------- table ----------
+function drawTable(d) {
+  const rows = [...d.stations].sort((a, b) => {
+    const x = a[sortK], y = b[sortK];
+    const c = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
+    return sortDir * c || a.key.localeCompare(b.key);
+  });
+  const cell = r => { const c = hotColor(r); return `<td class="num" style="background:${c.bg};color:${c.fg}">${fmtRate(r)}</td>`; };
+  document.querySelector("#tbl tbody").innerHTML = rows.map(s =>
+    `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td>${esc(s.sta)}</td>` +
+    `${cell(s.state)}${cell(s.global)}</tr>`).join("");
+  document.querySelectorAll("#tbl th").forEach(th =>
+    th.setAttribute("aria-sort", th.dataset.k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"));
+}
+
+// ---------- drawing ----------
+async function drawAll() {
+  const err = document.getElementById("error");
+  err.hidden = true;
+  try {
+    const d = await load(current);
+    const n = d.stations ? d.stations.length : 0;
+    document.getElementById("meta").textContent =
+      `${d.start} to ${d.end} (${d.hours} h) · ${d.phase} picks only · state = scautopick_state, global = scautopick_global · ` +
+      `${n} stations · generated ${d.generated}`;
+    if (d.error) {
+      err.textContent = `${current}: ${d.error}`; err.hidden = false;
+      ["p-hourly", "p-map"].forEach(id => Plotly.purge(id));
+      document.querySelector("#tbl tbody").innerHTML = "";
+      return;
+    }
+    const narrow = document.getElementById("p-hourly").clientWidth < 600;
+    await drawHourly(d, narrow);
+    await drawMap(d, narrow);
+    drawTable(d);
+    const m = document.getElementById("p-map");
+    if (!m._bound) {
+      m.on("plotly_click", ev => { const c = ev.points[0].customdata; if (c) selectStation(c[0], true); });
+      m._bound = true;
+    }
+  } catch (e) {
+    err.textContent = `Could not load ${current}: ${e.message}`;
+    err.hidden = false;
+  }
+}
+function selectStation(key, scroll) {
+  selKey = key;
+  const d = cache[current];
+  drawMap(d, document.getElementById("p-map").clientWidth < 600);
+  drawTable(d);
+  const tr = document.querySelector(`#tbl tr[data-key="${CSS.escape(key)}"]`);
+  if (tr && scroll) tr.scrollIntoView({block: "center", behavior: "smooth"});
+}
+
+document.querySelectorAll('input[name="sys"]').forEach(r =>
+  r.addEventListener("change", () => { current = r.value; drawAll(); }));
+document.querySelectorAll('input[name="pipe"]').forEach(r =>
+  r.addEventListener("change", () => { pipe = r.value; drawMap(cache[current], document.getElementById("p-map").clientWidth < 600); }));
+document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.k;
+  if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta") ? 1 : -1; }
+  drawTable(cache[current]);
+}));
+document.querySelector("#tbl tbody").addEventListener("click", ev => {
+  const tr = ev.target.closest("tr"); if (tr) selectStation(tr.dataset.key, false);
+});
+let rt;
+window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawAll, 250); });
+Plotly.setPlotConfig({topojsonURL: "topojson/"});
+drawAll();
+</script>
+</body>
+</html>
