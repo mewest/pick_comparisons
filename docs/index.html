@@ -39,10 +39,10 @@
   tr.sel td { outline:2px solid var(--accent); outline-offset:-2px; }
   .note { color:var(--muted); font-size:14px; margin:4px 0 0; }
   td.rate { cursor:help; }
-  #tip { position:fixed; z-index:10; background:#fff; border:1px solid #999; border-radius:6px; padding:8px 10px;
-         font-size:14px; line-height:1.45; box-shadow:0 3px 10px rgba(0,0,0,.18); font-variant-numeric:tabular-nums;
-         max-width:280px; }
-  #tip a { color:var(--accent); }
+  /* table tooltip styled like the Plotly hover labels: box in the cell colour, thin contrasting border */
+  #tip { position:fixed; z-index:10; border:1px solid; border-radius:3px; padding:5px 8px;
+         font-size:14px; line-height:1.35; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #tip a { color:inherit; text-decoration:underline; }
   @media (max-width: 860px) {
     header, .toggle, .error, main { padding-left:16px; padding-right:16px; }
     .toggle.small { padding-left:0; }
@@ -89,12 +89,13 @@ const FONT = '"Helvetica Neue","TeX Gyre Heros",Helvetica,Arial,sans-serif';
 const GRID = {showgrid: true, gridcolor: "#eeeeee", gridwidth: 0.5, zeroline: false,
               showline: true, mirror: true, linecolor: "#9a9a9a", linewidth: 1};
 const NETS = [{key: "AK", color: "#d62728"}, {key: "AV", color: "#7b2fa8"},
-              {key: "AT", color: "#2ca02c"}, {key: "II/IU", color: "#1f5fbf"}];
+              {key: "AT", color: "#2ca02c"}, {key: "II/IU", color: "#1f5fbf"}, {key: "other", color: "#8c8c8c"}];
 const PIPES = [{key: "state", dash: "solid"}, {key: "global", dash: "dash"}];
 // 'hot' colour scale, white at the low end; log10(picks/hour) from -1 (0.1) to 2 (100)
 const HOT = [[0, "#ffffff"], [0.35, "#ffd200"], [0.65, "#e60000"], [1, "#000000"]];
 const LMIN = -1, LMAX = 2;
 const TICKS = [0.1, 1, 10, 100];
+const HOVER = {font: {family: FONT, size: 14}};    // Plotly hover labels (table tooltip matches)
 const HOST = {onsite: "dispatchon", offsite: "dispatchoff", dev: "dispatchdev"};
 
 const cache = {};
@@ -138,17 +139,20 @@ async function load(sys) {
 // ---------- hourly plot ----------
 function drawHourly(d, narrow) {
   const t0 = Date.parse(d.hourly.t0);
+  const otherName = `other (${(d.hourly.other_nets || []).join(", ") || "none"})`;
   const traces = [];
   for (const p of PIPES) for (const n of NETS) {
     const sr = d.hourly.series[`${n.key}|${p.key}`] || {P: [], S: []};
     const P = sr.P || [], S = sr.S || P.map(() => 0);
     const tot = P.map((v, i) => v + S[i]);
-    traces.push({type: "scatter", mode: "lines", name: `${n.key} ${p.key}`, connectgaps: false,
+    traces.push({type: "scatter", mode: "lines", name: `${n.key === "other" ? otherName : n.key} ${p.key}`,
+                 connectgaps: false,
                  x: P.map((_, i) => new Date(t0 + (i + 0.5) * 3600e3).toISOString()),
                  y: tot.map(v => v > 0 ? v : null),          // log axis: empty hours left as gaps
                  customdata: P.map((v, i) => [v, S[i]]),
                  line: {color: n.color, dash: p.dash, width: 2},
-                 hovertemplate: `<b>${n.key} ${p.key}</b>: %{y} picks<br>P %{customdata[0]} · S %{customdata[1]}` +
+                 hovertemplate: `<b>%{fullData.name}</b>: %{y} picks` +
+                                `<br>P %{customdata[0]}<br>S %{customdata[1]}` +
                                 `<br>%{x|%Y-%m-%d %H}:00–:59 UTC<extra></extra>`});
   }
   const layout = {
@@ -160,7 +164,7 @@ function drawHourly(d, narrow) {
             tickvals: [1, 10, 100, 1000, 10000], ticktext: ["1", "10", "100", "1000", "10000"]},
     legend: narrow ? {orientation: "h", x: 0, y: -0.25, yanchor: "top", font: {size: 14}}
                    : {x: 1.01, xanchor: "left", y: 1, font: {size: 14}},
-    hovermode: "closest", plot_bgcolor: "white", paper_bgcolor: "white",
+    hovermode: "closest", plot_bgcolor: "white", paper_bgcolor: "white", hoverlabel: HOVER,
   };
   return Plotly.react("p-hourly", traces, layout, {responsive: true, displaylogo: false});
 }
@@ -201,7 +205,7 @@ function drawMap(d, narrow) {
       lonaxis: {range: [-185, -125], showgrid: true, gridcolor: "#cfd8e0", gridwidth: 0.5, dtick: 10},
       showframe: true, framecolor: "#9a9a9a", framewidth: 1, bgcolor: "white",
     },
-    paper_bgcolor: "white",
+    paper_bgcolor: "white", hoverlabel: HOVER,
   };
   return Plotly.react("p-map", [tr, ring], layout, {responsive: true, displaylogo: false});
 }
@@ -282,13 +286,18 @@ function showTip(td) {
   if (td === tipCell && !tip.hidden) return;
   const s = cache[current].stations.find(x => x.key === td.parentElement.dataset.key);
   const k = td.dataset.p;
-  tip.innerHTML = `<b>${esc(s.key)}</b> ${k} (picks/hr)<br>P ${fmtRate(s[k + "_P"])} · S ${fmtRate(s[k + "_S"])}<br>` +
+  tip.innerHTML = `<b>${esc(s.key)} ${k}</b>: ${fmtRate(s[k])} picks/hr<br>P ${fmtRate(s[k + "_P"])}<br>` +
+    `S ${fmtRate(s[k + "_S"])}<br>` +
     (s.chans.length ? `<a href="${esc(waveURL(current, s))}" target="_blank" rel="noopener">most recent hour at ${current}</a>`
-                    : `<span style="color:#666">no picks, so channels unknown</span>`);
+                    : `no picks, so channels unknown`);
+  const c = hotColor(s[k]);
+  tip.style.background = c.bg; tip.style.color = c.fg; tip.style.borderColor = c.fg === "#fff" ? "#fff" : "#444";
   tip.hidden = false;
   const r = td.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
-  tip.style.top = `${r.bottom + h + 4 > window.innerHeight ? r.top - h - 4 : r.bottom + 4}px`;
+  // beside the cell like a Plotly hover label: left of it if there is room, else right
+  const left = r.left - w - 6 >= 8 ? r.left - w - 6 : Math.min(window.innerWidth - w - 8, r.right + 6);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${Math.max(8, Math.min(window.innerHeight - h - 8, r.top + r.height / 2 - h / 2))}px`;
   tipCell = td;
 }
 const hideTipSoon = () => { clearTimeout(tipTimer); tipTimer = setTimeout(() => { tip.hidden = true; tipCell = null; }, 300); };

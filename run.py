@@ -3,10 +3,10 @@
 
     python run.py --start 2026-10-11 --end 2026-10-12
 
-For each system: dump automatic picks with dump_picks (output/<start>_<end>/picks_<system>.xml, git-ignored),
+For each system: dump automatic picks with dump_picks (output/picks_<system>.xml, git-ignored, overwritten each run),
 count P and S picks from the state and global scautopick pipelines, and write docs/data/<system>.json for the web
 page (hourly counts per network, average picks/hour per inventory station). End time is exclusive.
---reuse skips dump_picks when the XML for the window already exists.
+--reuse skips dump_picks and parses the existing output/picks_<system>.xml (make sure it covers the window).
 """
 
 import argparse
@@ -31,12 +31,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--start", required=True, type=timestamp, help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS (UTC)")
     p.add_argument("--end", required=True, type=timestamp, help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS (UTC)")
-    p.add_argument("--reuse", action="store_true", help="reuse existing pick dumps for this window")
+    p.add_argument("--reuse", action="store_true", help="reuse existing output/picks_<system>.xml")
     p.add_argument("--systems", nargs="+", default=config.SYSTEMS, choices=config.SYSTEMS,
                    help="subset of systems (default: all)")
     a = p.parse_args()
 
-    out = config.OUTPUT_DIR / f"{a.start}_{a.end}".replace(":", "")
+    out = config.OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
 
     for system in a.systems:

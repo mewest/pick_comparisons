@@ -57,12 +57,16 @@ def write(system, start, end, picks=None, stations=None, error=None):
     n_bins = int(np.ceil(hours))
     p["bin"] = ((p["time"] - s) / pd.Timedelta(hours=1)).astype(int)
     hourly = {}
-    for grp, nets in config.NETWORK_GROUPS.items():
+    grouped = [n for nets in config.NETWORK_GROUPS.values() for n in nets]
+    groups = {g: p["net"].isin(nets) for g, nets in config.NETWORK_GROUPS.items()}
+    groups[config.OTHER] = ~p["net"].isin(grouped)
+    for grp, mask in groups.items():
         for k in pipes:
-            sel = p[p["net"].isin(nets) & (p["pl"] == k)]
+            sel = p[mask & (p["pl"] == k)]
             hourly[f"{grp}|{k}"] = {ph: np.bincount(sel.loc[sel.phase == ph, "bin"], minlength=n_bins)[:n_bins].tolist()
                                     for ph in phases}
-    d["hourly"] = {"t0": s.strftime("%Y-%m-%dT%H:%M:%SZ"), "series": hourly}
+    d["hourly"] = {"t0": s.strftime("%Y-%m-%dT%H:%M:%SZ"), "series": hourly,
+                   "other_nets": sorted(set(p.loc[groups[config.OTHER], "net"]))}
 
     # per-station average picks/hour by pipeline and phase: all inventory stations plus any picked station
     cols = [f"{k}_{ph}" for k in pipes for ph in phases]
