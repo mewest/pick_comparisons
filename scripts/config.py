@@ -8,7 +8,7 @@ ROOT_DIR = PKG_DIR.parent
 
 SYSTEMS = ["onsite", "offsite", "dev"]
 PIPELINES = {"state": "scautopick_state:AEC", "global": "scautopick_global:AEC"}
-PHASE = "P"                                   # only picks with this phaseHint are counted
+PHASES = ["P", "S"]                           # picks counted, by phaseHint
 NETWORK_GROUPS = {"AK": ["AK"], "AV": ["AV"], "AT": ["AT"], "II/IU": ["II", "IU"]}   # hourly plot lines
 
 CONNECT_FILE = ROOT_DIR.parent / "connect.json"   # ~/play/connect.json, shared with system_comparisons

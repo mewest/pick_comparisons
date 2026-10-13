@@ -15,6 +15,8 @@ FROM Station, Network
 WHERE Station._parent_oid = Network._oid
 """
 
+COLS = ["time", "net", "sta", "loc", "cha", "phase", "author"]
+
 
 def dump(system, start, end, outfile):
     """Dump automatic picks (no amplitudes) in [start, end) to SCML with dump_picks. Tries FQDN, then IP."""
@@ -32,28 +34,29 @@ def dump(system, start, end, outfile):
 
 
 def parse(xmlfile):
-    """DataFrame (time, net, sta, cha, phase, author) of all picks in an SCML file, streamed."""
+    """DataFrame (time, net, sta, loc, cha, phase, author) of all picks in an SCML file, streamed."""
     rows = []
     for _, el in ET.iterparse(xmlfile, events=("end",)):
         if el.tag.rsplit("}", 1)[-1] != "pick":
             continue
-        rec = {"time": None, "net": None, "sta": None, "cha": None, "phase": None, "author": None}
+        rec = dict.fromkeys(COLS)
         for ch in el.iter():
             tag = ch.tag.rsplit("}", 1)[-1]
             if tag == "time":
                 v = ch.find("{*}value")
                 rec["time"] = v.text if v is not None else None
             elif tag == "waveformID":
-                rec["net"], rec["sta"], rec["cha"] = (ch.get("networkCode"), ch.get("stationCode"),
-                                                      ch.get("channelCode"))
+                rec["net"], rec["sta"] = ch.get("networkCode"), ch.get("stationCode")
+                rec["loc"], rec["cha"] = ch.get("locationCode", ""), ch.get("channelCode")
             elif tag == "phaseHint":
                 rec["phase"] = ch.text
             elif tag == "author":
                 rec["author"] = ch.text
         rows.append(rec)
         el.clear()
-    df = pd.DataFrame(rows, columns=["time", "net", "sta", "cha", "phase", "author"])
+    df = pd.DataFrame(rows, columns=COLS)
     df["time"] = pd.to_datetime(df.time, utc=True, format="ISO8601")
+    df["loc"] = df["loc"].fillna("")
     return df
 
 

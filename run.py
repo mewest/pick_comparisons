@@ -4,8 +4,8 @@
     python run.py --start 2026-10-11 --end 2026-10-12
 
 For each system: dump automatic picks with dump_picks (output/<start>_<end>/picks_<system>.xml, git-ignored),
-count P picks from the state and global scautopick pipelines, and write docs/data/<system>.json for the web page
-(hourly counts per network, average picks/hour per inventory station). End time is exclusive.
+count P and S picks from the state and global scautopick pipelines, and write docs/data/<system>.json for the web
+page (hourly counts per network, average picks/hour per inventory station). End time is exclusive.
 --reuse skips dump_picks when the XML for the window already exists.
 """
 
@@ -32,12 +32,14 @@ def main():
     p.add_argument("--start", required=True, type=timestamp, help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS (UTC)")
     p.add_argument("--end", required=True, type=timestamp, help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS (UTC)")
     p.add_argument("--reuse", action="store_true", help="reuse existing pick dumps for this window")
+    p.add_argument("--systems", nargs="+", default=config.SYSTEMS, choices=config.SYSTEMS,
+                   help="subset of systems (default: all)")
     a = p.parse_args()
 
     out = config.OUTPUT_DIR / f"{a.start}_{a.end}".replace(":", "")
     out.mkdir(parents=True, exist_ok=True)
 
-    for system in config.SYSTEMS:
+    for system in a.systems:
         t = time.time()
         xml = out / f"picks_{system}.xml"
         try:
@@ -47,7 +49,7 @@ def main():
             df = picks.parse(xml)
             st = picks.stations(system, a.start, a.end)
             d = web.write(system, a.start, a.end, df, st)
-            print(f"{system}: {len(df)} picks in dump, P picks used {d['n_picks']}, "
+            print(f"{system}: {len(df)} picks in dump, used {d['n_picks']}, "
                   f"{len(d['stations'])} stations, {time.time() - t:.0f} s", flush=True)
         except RuntimeError as e:
             print(e)
