@@ -13,6 +13,7 @@
   header { padding:20px 24px 8px; }
   h1 { margin:0 0 4px; font-size:24px; font-weight:600; }
   .meta { color:var(--muted); font-size:14px; }
+  .intro { margin:4px 0 8px; font-size:16px; line-height:1.45; max-width:900px; }
   .toggle { display:flex; gap:8px; padding:8px 24px 4px; flex-wrap:wrap; }
   .toggle label { border:1px solid var(--line); border-radius:6px; padding:8px 16px; cursor:pointer;
                   font-size:16px; user-select:none; }
@@ -55,6 +56,9 @@
 <body>
 <header>
   <h1>Raw Phase Picks</h1>
+  <p class="intro">This page shows the performance of different stations in the State and Global pipelines.
+    Statistics are based on the picks coming straight out of scautopick without consideration for subsequent phase
+    associations. The P and S phase designations are based on the assigned 'phasehint'.</p>
   <div class="meta" id="meta">Loading…</div>
 </header>
 <div class="toggle" role="radiogroup" aria-label="SeisComP system">
@@ -89,7 +93,7 @@ const FONT = '"Helvetica Neue","TeX Gyre Heros",Helvetica,Arial,sans-serif';
 const GRID = {showgrid: true, gridcolor: "#eeeeee", gridwidth: 0.5, zeroline: false,
               showline: true, mirror: true, linecolor: "#9a9a9a", linewidth: 1};
 const NETS = [{key: "AK", color: "#d62728"}, {key: "AV", color: "#7b2fa8"},
-              {key: "AT", color: "#2ca02c"}, {key: "II/IU", color: "#1f5fbf"}, {key: "other", color: "#8c8c8c"}];
+              {key: "AT", color: "#1f5fbf"}, {key: "II/IU", color: "#2ca02c"}, {key: "other", color: "#8c8c8c"}];
 const PIPES = [{key: "state", dash: "solid"}, {key: "global", dash: "dash"}];
 // 'hot' colour scale, white at the low end; log10(picks/hour) from -1 (0.1) to 2 (100)
 const HOT = [[0, "#ffffff"], [0.35, "#ffd200"], [0.65, "#e60000"], [1, "#000000"]];
