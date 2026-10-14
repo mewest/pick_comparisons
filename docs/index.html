@@ -29,13 +29,21 @@
   section h2 { margin:0; font-size:20px; font-weight:600; }
   .plot { width:100%; height:560px; }
   #p-map { height:680px; }
+  .mapwrap { position:relative; }
+  .zoom { position:absolute; left:12px; top:70px; display:flex; flex-direction:column; gap:4px; z-index:5; }
+  .zoom button { width:36px; height:36px; font-size:22px; line-height:1; padding:0; cursor:pointer;
+                 border:1px solid #9a9a9a; border-radius:6px; background:#fff; color:#1a1a1a;
+                 font-family:"Helvetica Neue","TeX Gyre Heros",Helvetica,Arial,sans-serif; }
+  .zoom button:hover { background:#eef3ff; border-color:var(--accent); }
+  .zoom button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .tablewrap { max-height:80vh; overflow:auto; border:1px solid var(--line); border-radius:6px; margin-top:8px; }
   table { border-collapse:collapse; width:100%; font-size:15px; font-variant-numeric:tabular-nums; }
   th, td { padding:5px 12px; text-align:left; border-bottom:1px solid #eee; white-space:nowrap; }
   th { position:sticky; top:0; background:var(--panel); cursor:pointer; user-select:none; font-weight:600;
        border-bottom:1px solid var(--line); }
-  th[aria-sort="ascending"]::after { content:" ▲"; font-size:11px; }
-  th[aria-sort="descending"]::after { content:" ▼"; font-size:11px; }
+  th::after { content:" ↕"; font-size:12px; color:#aaa; }
+  th[aria-sort="ascending"]::after { content:" ▲"; font-size:11px; color:inherit; }
+  th[aria-sort="descending"]::after { content:" ▼"; font-size:11px; color:inherit; }
   td.num, th.num { text-align:right; }
   tr.sel td { outline:2px solid var(--accent); outline-offset:-2px; }
   .note { color:var(--muted); font-size:14px; margin:4px 0 0; }
@@ -62,8 +70,8 @@
   <div class="meta" id="meta">Loading…</div>
 </header>
 <div class="toggle" role="radiogroup" aria-label="SeisComP system">
-  <label><input type="radio" name="sys" value="onsite" checked><span>onsite</span></label>
   <label><input type="radio" name="sys" value="offsite"><span>offsite</span></label>
+  <label><input type="radio" name="sys" value="onsite" checked><span>onsite</span></label>
   <label><input type="radio" name="sys" value="dev"><span>dev</span></label>
 </div>
 <div class="error" id="error" hidden></div>
@@ -74,7 +82,14 @@
       <label><input type="radio" name="pipe" value="state" checked><span>state</span></label>
       <label><input type="radio" name="pipe" value="global"><span>global</span></label>
     </div>
-    <div class="plot" id="p-map"></div>
+    <div class="mapwrap">
+      <div class="plot" id="p-map"></div>
+      <div class="zoom" role="group" aria-label="Map zoom">
+        <button type="button" data-z="in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button type="button" data-z="out" title="Zoom out" aria-label="Zoom out">−</button>
+        <button type="button" data-z="reset" title="Reset view" aria-label="Reset view">⟲</button>
+      </div>
+    </div>
     <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.1 floor.</p>
   </section>
   <section>
@@ -103,6 +118,7 @@ const HOVER = {font: {family: FONT, size: 14}};    // Plotly hover labels (table
 const HOST = {onsite: "dispatchon", offsite: "dispatchoff", dev: "dispatchdev"};
 
 const cache = {};
+let home = null;    // initial map view (reset button)
 let current = "onsite", pipe = "state", sortK = "state", sortDir = -1, selKey = null;
 
 const logRate = r => Math.min(LMAX, Math.max(LMIN, Math.log10(Math.max(r, 1e-9))));
@@ -209,7 +225,7 @@ function drawMap(d, narrow) {
       lonaxis: {range: [-185, -125], showgrid: true, gridcolor: "#cfd8e0", gridwidth: 0.5, dtick: 10},
       showframe: true, framecolor: "#9a9a9a", framewidth: 1, bgcolor: "white",
     },
-    paper_bgcolor: "white", hoverlabel: HOVER,
+    paper_bgcolor: "white", hoverlabel: HOVER, uirevision: "map",
   };
   return Plotly.react("p-map", [tr, ring], layout, {responsive: true, displaylogo: false});
 }
@@ -249,6 +265,10 @@ async function drawAll() {
     const narrow = document.getElementById("p-hourly").clientWidth < 600;
     await drawHourly(d, narrow);
     await drawMap(d, narrow);
+    if (!home) {    // initial view, for the reset button
+      const g = document.getElementById("p-map")._fullLayout.geo;
+      home = {lon: g.center.lon, lat: g.center.lat, rot: g.projection.rotation.lon};
+    }
     drawTable(d);
     const m = document.getElementById("p-map");
     if (!m._bound) {
@@ -313,6 +333,21 @@ tip.addEventListener("mouseenter", () => clearTimeout(tipTimer));
 tip.addEventListener("mouseleave", hideTipSoon);
 document.querySelector(".tablewrap").addEventListener("scroll", () => { tip.hidden = true; tipCell = null; });
 document.addEventListener("click", ev => { if (!ev.target.closest("#tip, td.rate")) { tip.hidden = true; tipCell = null; } });
+
+// ---------- map zoom buttons ----------
+function zoomMap(how) {
+  const el = document.getElementById("p-map");
+  const g = el._fullLayout && el._fullLayout.geo;
+  if (!g) return;
+  if (how === "reset") {
+    Plotly.relayout(el, {"geo.projection.scale": 1, "geo.center.lon": home.lon, "geo.center.lat": home.lat,
+                         "geo.projection.rotation.lon": home.rot});
+    return;
+  }
+  const s = g.projection.scale * (how === "in" ? 1.5 : 1 / 1.5);
+  Plotly.relayout(el, {"geo.projection.scale": Math.min(32, Math.max(0.5, s))});
+}
+document.querySelectorAll(".zoom button").forEach(b => b.addEventListener("click", () => zoomMap(b.dataset.z)));
 
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawAll, 250); });
