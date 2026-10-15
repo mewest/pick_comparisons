@@ -39,6 +39,7 @@ def main():
     out = config.OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
 
+    results = {}
     for system in a.systems:
         t = time.time()
         xml = out / f"picks_{system}.xml"
@@ -49,11 +50,16 @@ def main():
             df = picks.parse(xml)
             st = picks.stations(system, a.start, a.end)
             d = web.write(system, a.start, a.end, df, st)
+            results[system] = d
             print(f"{system}: {len(df)} picks in dump, used {d['n_picks']}, "
                   f"{len(d['stations'])} stations, {time.time() - t:.0f} s", flush=True)
         except RuntimeError as e:
             print(e)
             web.write(system, a.start, a.end, error=str(e).splitlines()[0])
+    if set(results) == set(config.SYSTEMS):
+        web.write_compare(a.start, a.end, results)
+    else:
+        print("compare.json not updated (needs all three systems in one run)")
     print(f"Web data in {config.DOCS_DIR / 'data'}")
     return 0
 

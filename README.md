@@ -22,7 +22,8 @@ XML (it must cover the window). `--systems` runs a subset. Database connections 
 - onsite / offsite / dev toggle
 - hourly P + S picks for AK, AV, AT, II/IU and all other networks (state solid, global dashed; log axis 1-10000)
 - station map coloured by average P + S picks/hr (log scale 0.1-100), state/global switch; all inventory stations
-- sortable station table, cells coloured like the map; hovering a rate shows P and S rates and a link to the
+- sortable station table, cells coloured like the map; state/global variance columns compare each station's
+  pick totals with the other two systems (docs/data/compare.json, written when all three systems run); hovering a rate shows P and S rates and a link to the
   live waveform view (gaps traceview, most recent hour) on the same system
 
 Publish: commit and push `docs/`; Pages serves `main` /docs.

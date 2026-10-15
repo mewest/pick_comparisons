@@ -47,7 +47,7 @@
   td.num, th.num { text-align:right; }
   tr.sel td { outline:2px solid var(--accent); outline-offset:-2px; }
   .note { color:var(--muted); font-size:14px; margin:4px 0 0; }
-  td.rate { cursor:help; }
+  td.rate, td.var { cursor:help; }
   /* table tooltip styled like the Plotly hover labels: box in the cell colour, thin contrasting border */
   #tip { position:fixed; z-index:10; border:1px solid; border-radius:3px; padding:5px 8px;
          font-size:14px; line-height:1.35; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -93,10 +93,13 @@
     <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.1 floor.</p>
   </section>
   <section>
+    <p class="note">State / global variance: the other two systems' total picks for that pipeline relative to this
+      system, (A + B) / (2 × this); 100% = same number of picks. Hover for P and S totals on each system.</p>
     <div class="tablewrap"><table id="tbl">
       <thead><tr>
         <th data-k="net">Network</th><th data-k="sta">Station</th>
         <th data-k="state" class="num">State picks/hr</th><th data-k="global" class="num">Global picks/hr</th>
+        <th data-k="svar" class="num">State variance</th><th data-k="gvar" class="num">Global variance</th>
       </tr></thead>
       <tbody></tbody>
     </table></div>
@@ -140,6 +143,29 @@ function hotColor(r) {           // same mapping as the map colour scale
   }
   return {bg: "#000", fg: "#fff"};
 }
+
+// cross-system pick totals per station (docs/data/compare.json): [state_P, state_S, global_P, global_S]
+const ORDER = ["offsite", "onsite", "dev"];
+let compare;
+async function loadCompare() {
+  if (compare === undefined) {
+    try {
+      const r = await fetch("data/compare.json", {cache: "no-store"});
+      compare = r.ok ? await r.json() : null;
+    } catch (e) { compare = null; }
+  }
+  return compare;
+}
+// variance (%) of this system's pipeline total vs the other two; null = no data, Infinity = none here but some elsewhere
+function variance(key, sys, pl, d) {
+  const c = compare && compare.start === d.start && compare.end === d.end ? compare.counts[key] : null;
+  if (!c || ORDER.some(x => !c[x])) return null;
+  const i = pl === "state" ? 0 : 2, tot = x => c[x][i] + c[x][i + 1];
+  const others = ORDER.filter(x => x !== sys).reduce((a, x) => a + tot(x), 0), mine = tot(sys);
+  if (mine === 0) return others === 0 ? null : Infinity;
+  return 100 * others / (2 * mine);
+}
+const fmtVar = v => v == null ? "–" : v === Infinity ? "∞" : `${Math.round(v)}%`;
 
 async function load(sys) {
   if (!cache[sys]) {
@@ -232,16 +258,19 @@ function drawMap(d, narrow) {
 
 // ---------- table ----------
 function drawTable(d) {
+  d.stations.forEach(s => { s.svar = variance(s.key, current, "state", d); s.gvar = variance(s.key, current, "global", d); });
   const rows = [...d.stations].sort((a, b) => {
     const x = a[sortK], y = b[sortK];
-    const c = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
+    if (x == null || y == null) return (x == null) - (y == null) || a.key.localeCompare(b.key);   // no data: last
+    const c = typeof x === "number" ? (x === y ? 0 : x - y) : String(x).localeCompare(String(y));
     return sortDir * c || a.key.localeCompare(b.key);
   });
+  const vcell = (v, k) => `<td class="num var" data-p="${k}">${fmtVar(v)}</td>`;
   const cell = (r, k) => { const c = hotColor(r);
     return `<td class="num rate" data-p="${k}" style="background:${c.bg};color:${c.fg}">${fmtRate(r)}</td>`; };
   document.querySelector("#tbl tbody").innerHTML = rows.map(s =>
     `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td>${esc(s.sta)}</td>` +
-    `${cell(s.state, "state")}${cell(s.global, "global")}</tr>`).join("");
+    `${cell(s.state, "state")}${cell(s.global, "global")}${vcell(s.svar, "state")}${vcell(s.gvar, "global")}</tr>`).join("");
   document.querySelectorAll("#tbl th").forEach(th =>
     th.setAttribute("aria-sort", th.dataset.k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"));
 }
@@ -252,6 +281,7 @@ async function drawAll() {
   err.hidden = true;
   try {
     const d = await load(current);
+    await loadCompare();
     const n = d.stations ? d.stations.length : 0;
     document.getElementById("meta").textContent =
       `${d.start} to ${d.end} (${d.hours} hr) · P + S picks · state = scautopick_state, global = scautopick_global · ` +
@@ -295,11 +325,11 @@ document.querySelectorAll('input[name="pipe"]').forEach(r =>
   r.addEventListener("change", () => { pipe = r.value; drawMap(cache[current], document.getElementById("p-map").clientWidth < 600); }));
 document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
   const k = th.dataset.k;
-  if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta") ? 1 : -1; }
+  if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta" || k === "svar" || k === "gvar") ? 1 : -1; }
   drawTable(cache[current]);
 }));
 document.querySelector("#tbl tbody").addEventListener("click", ev => {
-  if (ev.target.closest("td.rate")) return;    // rate cells open the tooltip instead
+  if (ev.target.closest("td.rate, td.var")) return;    // rate/variance cells open the tooltip instead
   const tr = ev.target.closest("tr"); if (tr) selectStation(tr.dataset.key, false);
 });
 // ---------- table tooltip (P / S rates + waveform link) ----------
@@ -310,12 +340,25 @@ function showTip(td) {
   if (td === tipCell && !tip.hidden) return;
   const s = cache[current].stations.find(x => x.key === td.parentElement.dataset.key);
   const k = td.dataset.p;
+  if (td.classList.contains("var")) { varTip(td, s, k); return; }
   tip.innerHTML = `<b>${esc(s.key)} ${k}</b>: ${fmtRate(s[k])} picks/hr<br>P ${fmtRate(s[k + "_P"])}<br>` +
     `S ${fmtRate(s[k + "_S"])}<br>` +
     (s.chans.length ? `<a href="${esc(waveURL(current, s))}" target="_blank" rel="noopener">most recent hour at ${current}</a>`
                     : `no picks, so channels unknown`);
   const c = hotColor(s[k]);
   tip.style.background = c.bg; tip.style.color = c.fg; tip.style.borderColor = c.fg === "#fff" ? "#fff" : "#444";
+  placeTip(td);
+}
+function varTip(td, s, k) {      // P and S totals on each system, always offsite, onsite, dev
+  const c = compare && compare.counts[s.key], i = k === "state" ? 0 : 2;
+  tip.innerHTML = ORDER.map(x => {
+    const v = c && c[x], line = `${x}: P ${v ? v[i] : "–"}, S ${v ? v[i + 1] : "–"}`;
+    return x === current ? `<b>${line}</b>` : line;
+  }).join("<br>");
+  tip.style.background = "#fff"; tip.style.color = "#1a1a1a"; tip.style.borderColor = "#444";
+  placeTip(td);
+}
+function placeTip(td) {
   tip.hidden = false;
   const r = td.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
   // beside the cell like a Plotly hover label: left of it if there is room, else right
@@ -326,13 +369,13 @@ function showTip(td) {
 }
 const hideTipSoon = () => { clearTimeout(tipTimer); tipTimer = setTimeout(() => { tip.hidden = true; tipCell = null; }, 300); };
 const tbody = document.querySelector("#tbl tbody");
-tbody.addEventListener("mouseover", ev => { const td = ev.target.closest("td.rate"); if (td) showTip(td); });
-tbody.addEventListener("mouseout", ev => { if (ev.target.closest("td.rate")) hideTipSoon(); });
-tbody.addEventListener("click", ev => { const td = ev.target.closest("td.rate"); if (td) showTip(td); });
+tbody.addEventListener("mouseover", ev => { const td = ev.target.closest("td.rate, td.var"); if (td) showTip(td); });
+tbody.addEventListener("mouseout", ev => { if (ev.target.closest("td.rate, td.var")) hideTipSoon(); });
+tbody.addEventListener("click", ev => { const td = ev.target.closest("td.rate, td.var"); if (td) showTip(td); });
 tip.addEventListener("mouseenter", () => clearTimeout(tipTimer));
 tip.addEventListener("mouseleave", hideTipSoon);
 document.querySelector(".tablewrap").addEventListener("scroll", () => { tip.hidden = true; tipCell = null; });
-document.addEventListener("click", ev => { if (!ev.target.closest("#tip, td.rate")) { tip.hidden = true; tipCell = null; } });
+document.addEventListener("click", ev => { if (!ev.target.closest("#tip, td.rate, td.var")) { tip.hidden = true; tipCell = null; } });
 
 // ---------- map zoom buttons ----------
 function zoomMap(how) {

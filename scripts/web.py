@@ -81,4 +81,16 @@ def write(system, start, end, picks=None, stations=None, error=None):
                      for r in st.to_dict("records")]
     d["n_picks"] = {c: int((p["col"] == c).sum()) for c in cols}
     _write(system, d)
+    d["counts"] = {f"{r['net']}.{r['sta']}": [int(r[c]) for c in cols] for r in st.to_dict("records")}
     return d
+
+
+def write_compare(start, end, results):
+    """docs/data/compare.json: per-station pick counts [state_P, state_S, global_P, global_S] for every system that
+    ran in this window (used for the table's variance columns)."""
+    d = {"start": start, "end": end, "systems": list(results),
+         "cols": [f"{k}_{ph}" for k in config.PIPELINES for ph in config.PHASES], "counts": {}}
+    for system, r in results.items():
+        for key, v in r["counts"].items():
+            d["counts"].setdefault(key, {})[system] = v
+    _write("compare", d)
