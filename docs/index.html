@@ -47,7 +47,8 @@
   td.num, th.num { text-align:right; }
   tr.sel td { outline:2px solid var(--accent); outline-offset:-2px; }
   .note { color:var(--muted); font-size:14px; margin:4px 0 0; }
-  td.rate, td.var { cursor:help; }
+  td.rate, td.var, td.stn { cursor:help; }
+  section h2.tabletitle { margin:4px 0 2px; font-size:20px; font-weight:600; }
   /* table tooltip styled like the Plotly hover labels: box in the cell colour, thin contrasting border */
   #tip { position:fixed; z-index:10; border:1px solid; border-radius:3px; padding:5px 8px;
          font-size:14px; line-height:1.35; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -93,6 +94,8 @@
     <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.1 floor.</p>
   </section>
   <section>
+    <h2 class="tabletitle">Pick statistics</h2>
+    <p class="note">Hover over station name for links to waveforms. Hover over statistics for detailed pick counts.</p>
     <div class="tablewrap"><table id="tbl">
       <thead><tr>
         <th data-k="net">Network</th><th data-k="sta">Station</th>
@@ -129,8 +132,9 @@ const logRate = r => Math.min(LMAX, Math.max(LMIN, Math.log10(Math.max(r, 1e-9))
 // > 3: integer; 0.3-3: one decimal; < 0.3: two decimals
 const fmtRate = r => r === 0 ? "0" : r > 3 ? String(Math.round(r)) : r >= 0.3 ? r.toFixed(1)
                    : r >= 0.005 ? r.toFixed(2) : "<0.01";
-const waveURL = (sys, s) => `http://${HOST[sys]}.aec.alaska.edu/gaps/traceview/#/?stations=` +
-  s.chans.map(c => `${s.key}.${c}`).join(",") + "&sort=false&tspan=3600";
+const WAVE_SPAN_S = 7200;    // traceview window: most recent 2 hours
+const waveURL = (sys, key, chans) => `http://${HOST[sys]}.aec.alaska.edu/gaps/traceview/#/?stations=` +
+  chans.map(c => `${key}.${c}`).join(",") + `&sort=false&tspan=${WAVE_SPAN_S}`;
 const esc = s => String(s ?? "–").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 function hotColor(r) {           // same mapping as the map colour scale
@@ -278,7 +282,7 @@ function drawTable(d) {
   const cell = (r, k) => { const c = hotColor(r);
     return `<td class="num rate" data-p="${k}" style="background:${c.bg};color:${c.fg}">${fmtRate(r)}</td>`; };
   document.querySelector("#tbl tbody").innerHTML = rows.map(s =>
-    `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td>${esc(s.sta)}</td>` +
+    `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td class="stn">${esc(s.sta)}</td>` +
     `${cell(s.state, "state")}${cell(s.global, "global")}` +
     `${vcell(s.s1, "state")}${vcell(s.s2, "state")}${vcell(s.g1, "global")}${vcell(s.g2, "global")}</tr>`).join("");
   document.querySelectorAll("#tbl th").forEach(th =>
@@ -292,6 +296,7 @@ async function drawAll() {
   try {
     const d = await load(current);
     await loadCompare();
+    ORDER.forEach(x => load(x).catch(() => {}));    // other systems' channels for the waveform links
     const n = d.stations ? d.stations.length : 0;
     document.getElementById("meta").textContent =
       `${d.start} to ${d.end} (${d.hours} hr) · P + S picks · state = scautopick_state, global = scautopick_global · ` +
@@ -340,9 +345,14 @@ document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", 
 }));
 document.querySelector("#tbl tbody").addEventListener("click", ev => {
   if (ev.target.closest("td.rate, td.var")) return;    // rate/ratio cells open the tooltip instead
-  const tr = ev.target.closest("tr"); if (tr) selectStation(tr.dataset.key, false);
+  const tr = ev.target.closest("tr"); if (!tr) return;
+  selectStation(tr.dataset.key, false);
+  if (ev.target.closest("td.stn")) {    // table was redrawn: reopen the links box on the new cell (touch)
+    const td = document.querySelector(`#tbl tr[data-key="${CSS.escape(tr.dataset.key)}"] td.stn`);
+    if (td) { tipCell = null; showTip(td); }
+  }
 });
-// ---------- table tooltip (P / S rates + waveform link) ----------
+// ---------- table tooltips (P / S rates, P / S totals, waveform links) ----------
 const tip = document.getElementById("tip");
 let tipCell = null, tipTimer = null;
 function showTip(td) {
@@ -351,12 +361,20 @@ function showTip(td) {
   const s = cache[current].stations.find(x => x.key === td.parentElement.dataset.key);
   const k = td.dataset.p;
   if (td.classList.contains("var")) { varTip(td, s, k); return; }
+  if (td.classList.contains("stn")) { stnTip(td, s); return; }
   tip.innerHTML = `<b>${esc(s.key)} ${k}</b>: ${fmtRate(s[k])} picks/hr<br>P ${fmtRate(s[k + "_P"])}<br>` +
-    `S ${fmtRate(s[k + "_S"])}<br>` +
-    (s.chans.length ? `<a href="${esc(waveURL(current, s))}" target="_blank" rel="noopener">most recent hour at ${current}</a>`
-                    : `no picks, so channels unknown`);
+    `S ${fmtRate(s[k + "_S"])}`;
   const c = hotColor(s[k]);
   tip.style.background = c.bg; tip.style.color = c.fg; tip.style.borderColor = c.fg === "#fff" ? "#fff" : "#444";
+  placeTip(td);
+}
+function stnTip(td, s) {     // waveform links on all three systems (channels from whichever system has picks)
+  const chans = [current, ...ORDER].map(x => cache[x]?.stations?.find(y => y.key === s.key)?.chans)
+                                     .find(c => c && c.length);
+  tip.innerHTML = `<b>${esc(s.key)}</b><br>` + (chans
+    ? ORDER.map(x => `<a href="${esc(waveURL(x, s.key, chans))}" target="_blank" rel="noopener">most recent 2 hours at ${x}</a>`).join("<br>")
+    : "no picks, so channels unknown");
+  tip.style.background = "#fff"; tip.style.color = "#1a1a1a"; tip.style.borderColor = "#444";
   placeTip(td);
 }
 function varTip(td, s, k) {      // P and S totals on each system, always offsite, onsite, dev
@@ -379,13 +397,13 @@ function placeTip(td) {
 }
 const hideTipSoon = () => { clearTimeout(tipTimer); tipTimer = setTimeout(() => { tip.hidden = true; tipCell = null; }, 300); };
 const tbody = document.querySelector("#tbl tbody");
-tbody.addEventListener("mouseover", ev => { const td = ev.target.closest("td.rate, td.var"); if (td) showTip(td); });
-tbody.addEventListener("mouseout", ev => { if (ev.target.closest("td.rate, td.var")) hideTipSoon(); });
+tbody.addEventListener("mouseover", ev => { const td = ev.target.closest("td.rate, td.var, td.stn"); if (td) showTip(td); });
+tbody.addEventListener("mouseout", ev => { if (ev.target.closest("td.rate, td.var, td.stn")) hideTipSoon(); });
 tbody.addEventListener("click", ev => { const td = ev.target.closest("td.rate, td.var"); if (td) showTip(td); });
 tip.addEventListener("mouseenter", () => clearTimeout(tipTimer));
 tip.addEventListener("mouseleave", hideTipSoon);
 document.querySelector(".tablewrap").addEventListener("scroll", () => { tip.hidden = true; tipCell = null; });
-document.addEventListener("click", ev => { if (!ev.target.closest("#tip, td.rate, td.var")) { tip.hidden = true; tipCell = null; } });
+document.addEventListener("click", ev => { if (!ev.target.closest("#tip, td.rate, td.var, td.stn")) { tip.hidden = true; tipCell = null; } });
 
 // ---------- map zoom buttons ----------
 function zoomMap(how) {
