@@ -93,12 +93,14 @@
     <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.1 floor.</p>
   </section>
   <section>
-    <p class="note" id="varnote"></p>
     <div class="tablewrap"><table id="tbl">
       <thead><tr>
         <th data-k="net">Network</th><th data-k="sta">Station</th>
         <th data-k="state" class="num">State picks/hr</th><th data-k="global" class="num">Global picks/hr</th>
-        <th data-k="svar" class="num">State variance</th><th data-k="gvar" class="num">Global variance</th>
+        <th data-k="s1" class="num">State ratio to <span class="o1">offsite</span></th>
+        <th data-k="s2" class="num">State ratio to <span class="o2">dev</span></th>
+        <th data-k="g1" class="num">Global ratio to <span class="o1">offsite</span></th>
+        <th data-k="g2" class="num">Global ratio to <span class="o2">dev</span></th>
       </tr></thead>
       <tbody></tbody>
     </table></div>
@@ -155,17 +157,18 @@ async function loadCompare() {
   }
   return compare;
 }
-// variance (%) = 2 * this system's pipeline total / (sum of the other two); null = no picks anywhere,
-// Infinity = picks here but none on the other two
-function variance(key, sys, pl, d) {
+// ratio (%) of this system's pipeline total (P + S) to another system's; null = no picks on either,
+// Infinity = picks here but none there
+function ratio(key, sys, other, pl, d) {
   const c = compare && compare.start === d.start && compare.end === d.end ? compare.counts[key] : null;
-  if (!c || ORDER.some(x => !c[x])) return null;
+  if (!c || !c[sys] || !c[other]) return null;
   const i = pl === "state" ? 0 : 2, tot = x => c[x][i] + c[x][i + 1];
-  const others = ORDER.filter(x => x !== sys).reduce((a, x) => a + tot(x), 0), mine = tot(sys);
-  if (others === 0) return mine === 0 ? null : Infinity;
-  return 100 * 2 * mine / others;
+  const mine = tot(sys), theirs = tot(other);
+  if (theirs === 0) return mine === 0 ? null : Infinity;
+  return 100 * mine / theirs;
 }
-const fmtVar = v => v == null ? "–" : v === Infinity ? "∞" : `${Math.round(v)}%`;
+// two significant digits
+const fmtVar = v => v == null ? "–" : v === Infinity ? "∞" : v === 0 ? "0%" : `${Number(v.toPrecision(2))}%`;
 
 async function load(sys) {
   if (!cache[sys]) {
@@ -259,9 +262,12 @@ function drawMap(d, narrow) {
 // ---------- table ----------
 function drawTable(d) {
   const oth = ORDER.filter(x => x !== current);
-  document.getElementById("varnote").textContent =
-    `The variance in picks is computed as 2 * ${current} / (${oth[0]} + ${oth[1]}). Hover for P and S totals on each system.`;
-  d.stations.forEach(s => { s.svar = variance(s.key, current, "state", d); s.gvar = variance(s.key, current, "global", d); });
+  document.querySelectorAll("#tbl th .o1").forEach(e => e.textContent = oth[0]);
+  document.querySelectorAll("#tbl th .o2").forEach(e => e.textContent = oth[1]);
+  d.stations.forEach(s => {
+    s.s1 = ratio(s.key, current, oth[0], "state", d); s.s2 = ratio(s.key, current, oth[1], "state", d);
+    s.g1 = ratio(s.key, current, oth[0], "global", d); s.g2 = ratio(s.key, current, oth[1], "global", d);
+  });
   const rows = [...d.stations].sort((a, b) => {
     const x = a[sortK], y = b[sortK];
     if (x == null || y == null) return (x == null) - (y == null) || a.key.localeCompare(b.key);   // no data: last
@@ -273,7 +279,8 @@ function drawTable(d) {
     return `<td class="num rate" data-p="${k}" style="background:${c.bg};color:${c.fg}">${fmtRate(r)}</td>`; };
   document.querySelector("#tbl tbody").innerHTML = rows.map(s =>
     `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td>${esc(s.sta)}</td>` +
-    `${cell(s.state, "state")}${cell(s.global, "global")}${vcell(s.svar, "state")}${vcell(s.gvar, "global")}</tr>`).join("");
+    `${cell(s.state, "state")}${cell(s.global, "global")}` +
+    `${vcell(s.s1, "state")}${vcell(s.s2, "state")}${vcell(s.g1, "global")}${vcell(s.g2, "global")}</tr>`).join("");
   document.querySelectorAll("#tbl th").forEach(th =>
     th.setAttribute("aria-sort", th.dataset.k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"));
 }
@@ -328,11 +335,11 @@ document.querySelectorAll('input[name="pipe"]').forEach(r =>
   r.addEventListener("change", () => { pipe = r.value; drawMap(cache[current], document.getElementById("p-map").clientWidth < 600); }));
 document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
   const k = th.dataset.k;
-  if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta" || k === "svar" || k === "gvar") ? 1 : -1; }
+  if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta" || /^[sg][12]$/.test(k)) ? 1 : -1; }
   drawTable(cache[current]);
 }));
 document.querySelector("#tbl tbody").addEventListener("click", ev => {
-  if (ev.target.closest("td.rate, td.var")) return;    // rate/variance cells open the tooltip instead
+  if (ev.target.closest("td.rate, td.var")) return;    // rate/ratio cells open the tooltip instead
   const tr = ev.target.closest("tr"); if (tr) selectStation(tr.dataset.key, false);
 });
 // ---------- table tooltip (P / S rates + waveform link) ----------
