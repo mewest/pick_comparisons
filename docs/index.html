@@ -41,7 +41,11 @@
   th, td { padding:5px 12px; text-align:left; border-bottom:1px solid #eee; white-space:nowrap; }
   th { position:sticky; top:0; background:var(--panel); cursor:pointer; user-select:none; font-weight:600;
        border-bottom:1px solid var(--line); }
-  th::after { content:" ↕"; font-size:12px; color:#aaa; }
+  th[data-k]::after { content:" ↕"; font-size:12px; color:#aaa; }
+  /* group header row above the column headers (second header row sticks just below it) */
+  tr.grp th { text-align:center; cursor:default; font-size:15px; border-bottom:1px solid var(--line); }
+  tr.grp th + th { border-left:2px solid var(--line); }
+  #tbl th[data-k="s1"], #tbl tbody td:nth-child(5) { border-left:2px solid var(--line); }
   th[aria-sort="ascending"]::after { content:" ▲"; font-size:11px; color:inherit; }
   th[aria-sort="descending"]::after { content:" ▼"; font-size:11px; color:inherit; }
   td.num, th.num { text-align:right; }
@@ -97,7 +101,9 @@
     <h2 class="tabletitle">Pick statistics</h2>
     <p class="note">Hover over station name for links to waveforms. Hover over statistics for detailed pick counts.</p>
     <div class="tablewrap"><table id="tbl">
-      <thead><tr>
+      <thead>
+      <tr class="grp"><th colspan="4" id="grp-own">onsite performance</th><th colspan="4">comparison to other systems</th></tr>
+      <tr>
         <th data-k="net">Network</th><th data-k="sta">Station</th>
         <th data-k="state" class="num">State picks/hr</th><th data-k="global" class="num">Global picks/hr</th>
         <th data-k="s1" class="num">State ratio to <span class="o1">offsite</span></th>
@@ -285,7 +291,8 @@ function drawTable(d) {
     `<tr data-key="${esc(s.key)}"${s.key === selKey ? ' class="sel"' : ""}><td>${esc(s.net)}</td><td class="stn">${esc(s.sta)}</td>` +
     `${cell(s.state, "state")}${cell(s.global, "global")}` +
     `${vcell(s.s1, "state")}${vcell(s.s2, "state")}${vcell(s.g1, "global")}${vcell(s.g2, "global")}</tr>`).join("");
-  document.querySelectorAll("#tbl th").forEach(th =>
+  document.getElementById("grp-own").textContent = `${current} performance`;
+  document.querySelectorAll("#tbl th[data-k]").forEach(th =>
     th.setAttribute("aria-sort", th.dataset.k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"));
 }
 
@@ -338,7 +345,7 @@ document.querySelectorAll('input[name="sys"]').forEach(r =>
   r.addEventListener("change", () => { current = r.value; drawAll(); }));
 document.querySelectorAll('input[name="pipe"]').forEach(r =>
   r.addEventListener("change", () => { pipe = r.value; drawMap(cache[current], document.getElementById("p-map").clientWidth < 600); }));
-document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
+document.querySelectorAll("#tbl th[data-k]").forEach(th => th.addEventListener("click", () => {
   const k = th.dataset.k;
   if (k === sortK) sortDir = -sortDir; else { sortK = k; sortDir = (k === "net" || k === "sta" || /^[sg][12]$/.test(k)) ? 1 : -1; }
   drawTable(cache[current]);
@@ -419,6 +426,14 @@ function zoomMap(how) {
   Plotly.relayout(el, {"geo.projection.scale": Math.min(32, Math.max(0.5, s))});
 }
 document.querySelectorAll(".zoom button").forEach(b => b.addEventListener("click", () => zoomMap(b.dataset.z)));
+
+function stickyHeader() {
+  // 1 px overlap so no body row shows through a sub-pixel gap between the two sticky rows
+  const h = document.querySelector("#tbl tr.grp th").getBoundingClientRect().height;
+  document.querySelectorAll("#tbl th[data-k]").forEach(th => th.style.top = `${Math.floor(h) - 1}px`);
+}
+stickyHeader();
+window.addEventListener("resize", stickyHeader);
 
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawAll, 250); });
