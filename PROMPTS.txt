@@ -1,0 +1,54 @@
+This is a subset of my Claude prompts:
+
+I want to build a new web dashboard similar in style to system_comparisons. This one will display the raw seismic phase picks from the three systems. This project should live in ~/play/pick_comparisons. The web dashboard should reside at: https://mewest.github.io/pick_comparisons. However, it should use the existing MCP servers in sc_mcp, and the same connect.json file.
+
+The set of scripts should perform the following tasks. Run the scripts and adjust the code as needed:
+
+-> Extract picks from the database based on a —start and —end flag on the command line. This can be acheived with commands similar to “dump_picks -d USER:PASSWORD@assessdev.aec.alaska.edu:PORT/seiscomp -t "2026-10-11~2026-10-12" -o output/picks_dev.xml”. Do this for all three databases—onsite, offsite and dev. These pig files contain author fields that distinguish picks from the ‘state’ pipeline (which is built on waveform data bandpass filtered at high frequencies), and the lower band pass filtered ‘global’ pipeline.
+
+-> Create a simple web interface in the style of the system_comparison webpage. The new page should toggle similarly between the three systems. 
+
+The top panel should have line graphs with data points spaced hourly representing the number of picks per hour on stations within each network and pipeline. There will be eight lines on this graph:
+     AK network, state pipeline, solid red line
+     AK network, global pipeline, dashed red line
+     AV network, state pipeline, solid purple line
+     AV network, global pipeline, dashed purple line
+     AT network, state pipeline, solid green line
+     AT network, global pipeline, dashed green line
+     II/IU networks, state pipeline, solid blue line 
+     II/IU networks, global pipeline, dashed blue line
+Make the x-axis dynamic (like system￼￼_comparison)￼ so that it can span hours to days. 
+
+The middle panel should show an interactive map with stations colored by the average hourly pick rate. This map should include a radio button to toggle between the state and global pipelines. Use the state pipeline as the default. Make the color scale logarithmic with a floor of 0.01 events per hour and a ceiling of 1000 events/hour. Use the ‘hot’ color scale with white for the low end. 
+
+The bottom panel is a long table with a row for each station. There should be columns for network, station name, the average number of state picks per hour across the whole time range, and a similar column for the average number of global picks.￼ Color code the state and hourly boxes the same as the map. Make the table sortable on any of the columns. 
+-----
+
+This is excellent. Here are improvements:
+
+#### TOP panel (line plot)
+Make the pick counts the sum of both P and S
+In the mouseover windows, give both the number of P and S phases.
+Make the y-axis a log scale between 1 and 10000 picks/hr.
+Remove the panel title “Hourly picks by network and pipeline”
+
+#### Middle panel (map)
+Change the colorbar to 0.1 to 100 
+Calculate the event rate based on both P and S
+Call then out seperately in the mouse over (P state, S state, P global, S global)
+In this panel and the yable in bottom panel, round all display values for events/hour to the nearest integer if the value is >3. If it is less than 3 include a single decimal point. If the value is less than 0.3, then include 2 decimal places.
+remove the panel title “Average picks per hour by station”
+
+#### Bottom panel (table)
+Remove the panel title “Stations”
+Change the abbreviation for hour from h to hr
+When you mouse over the number of picks in the table show the individual P and S hour rates. Also include a hyperlink to the corresponding live waveform view using a URL similar to this:
+http://dispatchdev.aec.alaska.edu/gaps/traceview/#/?stations=AK.GREN..HHE,AK.GREN..HHN,AK.GREN..HHZ&sort=false&tspan=3600
+Use dispatchoff, dispatchon, dispatchdev to match the system. The three channels (for most stations) will be BH?, HH?, or similar. You can infer the the two base characters of the channel code from the files containing the picks. In the mouse over itself, do not write out the full url. Simply write “most recent hour at onsite”. Or offsite or dev as appropriate.
+ —-
+—-
+
+In panel 3, add a 5th column called “state variance”. For onsite, this value is a percentage calculated as (total number of state picks from offsite + total number of state picks from dev) / (2 * total number of state picks from onsite). Permute onsite, offsite, dev to get this value for the other two systems. This value should be expressed as an integer percentage. The mouseover for this box should include the total number of P and S picks for each of the three systems, six values in total. In the mouseover, keep the order of the systems listed as offsite, onsite, dev regardless of the system being highlighted. Show the P and S values on a single line. Three lines total. Leave the background colors of these table cells uncolored. Add a 6th column to this table that is the same as the 5th, but lists the same variance values for the global pipeline. Include very short descriptions of columns 5 and 6 at the top of panel 3 in small text. 
+
+For this upgrade, do not download new picks. Use the existing picks. Commit and push. 
+

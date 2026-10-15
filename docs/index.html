@@ -93,8 +93,7 @@
     <p class="note">Click a station to find it in the table. Stations with no picks are drawn white at the 0.1 floor.</p>
   </section>
   <section>
-    <p class="note">State / global variance: the other two systems' total picks for that pipeline relative to this
-      system, (A + B) / (2 × this); 100% = same number of picks. Hover for P and S totals on each system.</p>
+    <p class="note" id="varnote"></p>
     <div class="tablewrap"><table id="tbl">
       <thead><tr>
         <th data-k="net">Network</th><th data-k="sta">Station</th>
@@ -156,14 +155,15 @@ async function loadCompare() {
   }
   return compare;
 }
-// variance (%) of this system's pipeline total vs the other two; null = no data, Infinity = none here but some elsewhere
+// variance (%) = 2 * this system's pipeline total / (sum of the other two); null = no picks anywhere,
+// Infinity = picks here but none on the other two
 function variance(key, sys, pl, d) {
   const c = compare && compare.start === d.start && compare.end === d.end ? compare.counts[key] : null;
   if (!c || ORDER.some(x => !c[x])) return null;
   const i = pl === "state" ? 0 : 2, tot = x => c[x][i] + c[x][i + 1];
   const others = ORDER.filter(x => x !== sys).reduce((a, x) => a + tot(x), 0), mine = tot(sys);
-  if (mine === 0) return others === 0 ? null : Infinity;
-  return 100 * others / (2 * mine);
+  if (others === 0) return mine === 0 ? null : Infinity;
+  return 100 * 2 * mine / others;
 }
 const fmtVar = v => v == null ? "–" : v === Infinity ? "∞" : `${Math.round(v)}%`;
 
@@ -258,6 +258,9 @@ function drawMap(d, narrow) {
 
 // ---------- table ----------
 function drawTable(d) {
+  const oth = ORDER.filter(x => x !== current);
+  document.getElementById("varnote").textContent =
+    `The variance in picks is computed as 2 * ${current} / (${oth[0]} + ${oth[1]}). Hover for P and S totals on each system.`;
   d.stations.forEach(s => { s.svar = variance(s.key, current, "state", d); s.gvar = variance(s.key, current, "global", d); });
   const rows = [...d.stations].sort((a, b) => {
     const x = a[sortK], y = b[sortK];
